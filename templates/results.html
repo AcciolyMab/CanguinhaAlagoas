@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        table {
+            width: 100%;
+            height: 60%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .title {
+            text-align: center;
+            font-size: 32px;
+            margin-bottom: 20px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .sort-btn {
+            border: none;
+            background: none;
+            cursor: pointer;
+            outline: none;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+        }
+        .sort-btn:focus {
+            outline: none;
+        }
+        .sort-icon {
+            width: 10px;
+            height: 10px;
+            margin-left: 4px;
+            transition: transform 0.2s ease;
+            background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff' width='18px' height='18px'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+        .sort-icon.up {
+            transform: rotate(-180deg);
+        }
+        .pagination {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .pagination button {
+            margin: 0 4px;
+            padding: 4px 8px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+        .pagination input {
+            width: 40px;
+            text-align: center;
+            border: 1px solid #ddd;
+            padding: 4px;
+        }
+        .pagination span {
+            margin: 0 4px;
+            font-weight: bold;
+        }
+        .table-container {
+            height: 40%;
+            overflow-y: hidden;
+        }
+    </style>
+    <script>
+        function exibirPagina(pagina) {
+            var linhas = document.querySelectorAll('tbody tr');
+            var linhasPorPagina = parseInt(document.getElementById('linhasPorPagina').value);
+            var inicio = (pagina - 1) * linhasPorPagina;
+            var fim = inicio + linhasPorPagina;
+
+            for (var i = 0; i < linhas.length; i++) {
+                linhas[i].style.display = 'none';
+            }
+
+            for (var j = inicio; j < fim && j < linhas.length; j++) {
+                linhas[j].style.display = 'table-row';
+            }
+        }
+
+        function avancarPagina() {
+            var paginaAtual = parseInt(document.getElementById('paginaAtual').value);
+            var totalPaginas = parseInt(document.getElementById('totalPaginas').innerHTML);
+
+            if (paginaAtual < totalPaginas) {
+                document.getElementById('paginaAtual').value = paginaAtual + 1;
+                exibirPagina(paginaAtual + 1);
+            }
+        }
+
+        function voltarPagina() {
+            var paginaAtual = parseInt(document.getElementById('paginaAtual').value);
+
+            if (paginaAtual > 1) {
+                document.getElementById('paginaAtual').value = paginaAtual - 1;
+                exibirPagina(paginaAtual - 1);
+            }
+        }
+
+        function primeiraPagina() {
+            document.getElementById('paginaAtual').value = 1;
+            exibirPagina(1);
+        }
+
+        function ultimaPagina() {
+            var totalPaginas = parseInt(document.getElementById('totalPaginas').innerHTML);
+            document.getElementById('paginaAtual').value = totalPaginas;
+            exibirPagina(totalPaginas);
+        }
+
+        function ordenarPorValorVenda() {
+            var linhas = Array.from(document.querySelectorAll('tbody tr'));
+            var sortIcon = document.getElementById('sortIconValorVenda');
+            var ascendingOrder = sortIcon.classList.contains('up');
+
+            linhas.sort(function(a, b) {
+                var aValor = parseFloat(a.cells[2].textContent.replace(',', '.'));
+                var bValor = parseFloat(b.cells[2].textContent.replace(',', '.'));
+
+                if (ascendingOrder) {
+                    return aValor - bValor;
+                } else {
+                    return bValor - aValor;
+                }
+            });
+
+            for (var i = 0; i < linhas.length; i++) {
+                document.querySelector('tbody').appendChild(linhas[i]);
+            }
+
+            ascendingOrder ? sortIcon.classList.remove('up') : sortIcon.classList.add('up');
+        }
+
+        function atualizarPaginacao() {
+            var linhas = document.querySelectorAll('tbody tr');
+            var linhasPorPagina = parseInt(document.getElementById('linhasPorPagina').value);
+            var totalPaginas = Math.ceil(linhas.length / linhasPorPagina);
+            document.getElementById('totalPaginas').innerHTML = totalPaginas;
+        }
+
+        window.addEventListener('load', function() {
+            exibirPagina(1);
+            atualizarPaginacao();
+        });
+    </script>
+</head>
+<body>
+    <div class="title">Lista de Compras</div>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>GTIN</th>
+                    <th>Descrição</th>
+                    <th>
+                        Valor de Venda
+                        <button class="sort-btn" onclick="ordenarPorValorVenda()">
+                            <span class="sort-icon" id="sortIconValorVenda"></span>
+                        </button>
+                    </th>
+                    <th>CNPJ</th>
+                    <th>Nome Fantasia</th>
+                    <th>Logradouro</th>
+                    <th>Número</th>
+                    <th>Bairro</th>
+                    <th>Latitude</th>
+                    <th>Longitude</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data %}
+                    <tr>
+                        <td>{{ item.produto.gtin }}</td>
+                        <td>{{ item.produto.descricao }}</td>
+                        <td>{{ item.produto.venda.valorVenda }}</td>
+                        <td>{{ item.estabelecimento.cnpj }}</td>
+                        <td>{{ item.estabelecimento.nomeFantasia }}</td>
+                        <td>{{ item.estabelecimento.endereco.nomeLogradouro }}</td>
+                        <td>{{ item.estabelecimento.endereco.numeroImovel }}</td>
+                        <td>{{ item.estabelecimento.endereco.bairro }}</td>
+                        <td>{{ item.estabelecimento.endereco.latitude }}</td>
+                        <td>{{ item.estabelecimento.endereco.longitude }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="pagination">
+        <button onclick="primeiraPagina()" style="display: inline-block;">Primeira</button>
+        <button onclick="voltarPagina()" style="display: inline-block;">Anterior</button>
+        <input type="text" id="paginaAtual" value="1" style="width: 40px; text-align: center; display: inline-block;">
+        <span style="display: inline-block;"> de <span id="totalPaginas">1</span></span>
+        <button onclick="avancarPagina()" style="display: inline-block;">Próxima</button>
+        <button onclick="ultimaPagina()" style="display: inline-block;">Última</button>
+        <label for="linhasPorPagina" style="display: inline-block;">Itens por página:</label>
+        <select id="linhasPorPagina" onchange="exibirPagina(1); atualizarPaginacao();" style="width: 70px; display: inline-block;">
+            <option value="10" selected>10</option>
+            <option value="30">30</option>
+            <option value="50">50</option>
+        </select>
+    </div>
+<div class="title">Lista de Compras</div>
+
+    <!-- Botão para iniciar o processo -->
+<div style="text-align: center; margin-bottom: 20px;">
+<button onclick="calculateMinimumCost();" style="background-color: #4CAF50; color: white; padding: 10px 20px; border: none; cursor: pointer; font-size: 16px;">
+    Calcular Custo Mínimo
+</button>
+</div>
+
+<!-- Adicione este elemento para exibir o resultado -->
+<div id="result"></div>
+<script>
+function calculateMinimumCost() {
+    // Coletar os dados da tabela
+    var data = [];
+    var tableRows = document.querySelectorAll('tbody tr');
+    tableRows.forEach(function(row) {
+        var rowData = {
+            gtin: row.cells[0].textContent,
+            descricao: row.cells[1].textContent,
+            valorVenda: row.cells[2].textContent,
+            cnpj: row.cells[3].textContent,
+            nomeFantasia: row.cells[4].textContent,
+            nomeLogradouro: row.cells[5].textContent,
+            numeroImovel: row.cells[6].textContent,
+            bairro: row.cells[7].textContent,
+            latitude: row.cells[8].textContent,
+            longitude: row.cells[9].textContent
+        };
+        data.push(rowData);
+    });
+
+    // Fazer a chamada fetch para enviar os dados para o backend
+    fetch('/create_minimal_cost_list/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Aqui você pode formatar os dados conforme necessário, por exemplo, construindo uma string HTML
+        var resultHtml = "<h3>Custo Total: " + data.total_cost + "</h3>"; // Personalize isso conforme necessário
+        document.getElementById('result').innerHTML = resultHtml;
+    })
+    .catch(error => {
+        console.error('Ocorreu um erro:', error);
+    });
+}
+
+</script>
+</body>
+</html>

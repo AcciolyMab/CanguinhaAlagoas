@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <meta charset="UTF-8">
+    <title>Insira a Lista de Códigos de Barras</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        /* CSS for the container div to hold checkboxes */
+        .checkbox-container {
+            height: 200px; /* Adjust the height as per your preference */
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+
+        /* Additional styles for labels and checkboxes */
+        .checkbox-container label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* Move the checkbox to the end */
+        .checkbox-container input[type="checkbox"] {
+            order: 2;
+        }
+
+        /* Style for the header */
+        .header {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1 class="header">Insira a Lista de Códigos de Barras</h1>
+    <form id='dataForm' action="/consultarProduto/" method="post" onsubmit="getFormData(event)">
+        <!-- Use campos sequenciais para códigos de barras -->
+        <!-- <textarea name="item_list" placeholder="Insira a lista de códigos de barras separados por vírgulas"></textarea> -->
+        <input type="hidden" id="hiddenField" name="formData" value="">
+        <div class="checkbox-container">
+            <label>
+                Selecionar Todos
+                <input type="checkbox" id="select_all" onclick="selectAllItems()">
+            </label>
+            <label>
+                Arroz Parboilizado
+                <input type="checkbox" name="item_list" value="Arroz Parboilizado" data-value="7896006716112, 7893500024996, 7896012300213, 7898018160082, 7896084700027">
+            </label>
+            <label>
+                Feijão Carioca
+                <input type="checkbox" name="item_list" value="Feijão Carioca" data-value="7896006744115, 7893500007715, 7898383101000, 7898907040969, 7898902735167">
+            </label>
+            <label>
+                Espaguete Macarrão
+                <input type="checkbox" name="item_list" value="Espaguete Macarrão" data-value="7896213005184, 7896532701576, 7896005213018, 7896005030530, 7896005213018">
+            </label>
+            <label>
+                Molho de Tomate
+                <input type="checkbox" name="item_list" value="Molho de Tomate" data-value="7896102501872, 7908235000259, 7896036098981, 7897517206086, 7898366932768">
+            </label>
+            <label>
+                Oleo de Soja
+                <input type="checkbox" name="item_list" value="Oleo de Soja" data-value="7891107101621, 7892300001428, 7898247780075, 7896036090244, 7892300030060">
+            </label>
+            <label>
+                Açúcar Cristal
+                <input type="checkbox" name="item_list" value="Açúcar Cristal" data-value="7896065200072, 7896215300591, 7896065200065, 7897261800011, 7896215300591">
+            </label>
+            <label>
+                Café Torrado e Moído
+                <input type="checkbox" name="item_list" value="Café Torrado e Moído" data-value="7896005800027, 7896224808101, 7896224803069, 7898286200060, 7896089011982">
+            </label>
+            <label>
+                Flocão De Milho
+                <input type="checkbox" name="item_list" value="Flocão De Milho" data-value="7896481130106, 7891091010718, 7898366932973, 7898932426042, 7898366930023">
+            </label>
+            <label>
+                Sardinha
+                <input type="checkbox" name="item_list" value="Sardinha" data-value="7891167021013, 7891167023017, 7891167023024, 7896009301063, 7891167023024">
+            </label>
+            <label>
+                Biscoito Água
+                <input type="checkbox" name="item_list" value="Biscoito Água" data-value="7896024760302, 7896005030349, 7896024721358, 7896061300677, 7891000370896">
+            </label>
+            <label>
+                Sal Refinado
+                <input type="checkbox" name="item_list" value="Sal Refinado" data-value="7896110100012, 7897472200013, 7896110100043, 7898272919150, 7897472200013">
+            </label>
+        </div>
+
+        <label for="address">Endereço:</label>
+        <input type="text" id="addressInput" name="address" placeholder="Enter address">
+        <button type="button" onclick="getGeolocation()">Obter Geolocalização</button>
+
+
+        <p id="displayLatitude"></p>
+        <p id="displayLongitude"></p>
+
+        <input type="hidden" id="latitude" name="latitude" value="">
+        <input type="hidden" id="longitude" name="longitude" value="">
+
+
+        <label for="dias">Dias:</label>
+        <select name="dias" id="dias" style="width: 80px">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <!-- Outras opções aqui... -->
+        </select>
+        <label for="raio">Raio:</label>
+        <select name="raio" id="raio" style="width: 80px">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="11">11</option>
+            <option value="12">12</option>
+            <option value="13">13</option>
+            <option value="14">14</option>
+            <option value="15">15</option>
+            <!-- Outras opções aqui... -->
+        </select>
+        <input type="submit" value="Enviar">
+    </form>
+
+    <script>
+        var globalLatitude = null;
+    var globalLongitude = null;
+        function selectAllItems() {
+            const selectAllCheckbox = document.getElementById('select_all');
+            const itemCheckboxes = document.querySelectorAll('input[name="item_list"]');
+            itemCheckboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+            });
+        }
+
+        async function getGeolocation() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(showPosition, showError);
+            } else {
+                alert("Geolocalização não suportada pelo navegador.");
+            }
+        }
+
+        // Função de callback para mostrar a posição
+        async function showPosition(position) {
+            const latitude = position.coords.latitude;
+            const longitude = position.coords.longitude;
+
+            globalLatitude = latitude;
+        globalLongitude = longitude;
+
+            // Atualize os campos de latitude e longitude no formulário
+            document.getElementById("latitude").value = latitude;
+            document.getElementById("longitude").value = longitude;
+
+            // Envie os valores de latitude e longitude para o servidor usando AJAX
+    $.ajax({
+        url: '/optimization', // A URL da rota no servidor que receberá os valores
+        method: 'GET', // Ou 'POST', dependendo de como você configurou a rota no servidor
+        data: {
+            latitude: latitude,
+            longitude: longitude
+        },
+        success: function(response) {
+            // Faça algo com a resposta do servidor se necessário
+            console.log(response);
+        },
+        error: function(error) {
+            // Trate qualquer erro que possa ocorrer
+            console.error(error);
+        }
+    });
+        }
+
+        // Função de callback para tratamento de erros
+        function showError(error) {
+            switch (error.code) {
+                case error.PERMISSION_DENIED:
+                    alert("Permissão para geolocalização negada pelo usuário.");
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    alert("Informações de geolocalização indisponíveis.");
+                    break;
+                case error.TIMEOUT:
+                    alert("Tempo expirado para obter a geolocalização.");
+                    break;
+                case error.UNKNOWN_ERROR:
+                    alert("Erro desconhecido ao obter a geolocalização.");
+                    break;
+            }
+        }
+
+        function getFormData(event) {
+            event.preventDefault(); // prevent the form from being submitted normally
+            const itemCheckboxes = document.querySelectorAll('input[name="item_list"]');
+            const formData = Array.from(itemCheckboxes)
+                .filter(checkbox => checkbox.checked)
+                .map(checkbox => {
+                    return {
+                        description: checkbox.value,
+                        gtins: checkbox.dataset.value.split(', ')
+                    };
+                });
+            document.getElementById('hiddenField').value = JSON.stringify(formData);
+            event.target.submit();
+        }
+
+        async function getGeolocationFromAddress() {
+            const address = document.getElementById('addressInput').value;
+            try {
+                const response = await fetch(`/geolocation?address=${encodeURIComponent(address)}`);
+                const data = await response.json();
+                if (data.latitude && data.longitude) {
+                    // Mostrar latitude e longitude nos campos de parágrafo
+                    document.getElementById('displayLatitude').textContent = "Latitude: " + data.latitude;
+                    document.getElementById('displayLongitude').textContent = "Longitude: " + data.longitude;
+
+                    // Atualizar os campos ocultos com os valores de latitude e longitude
+                    document.getElementById('latitude').value = data.latitude;
+                    document.getElementById('longitude').value = data.longitude;
+                } else {
+                    alert('Falha ao buscar geolocalização.');
+                }
+            } catch (error) {
+                alert('Ocorreu um erro ao buscar a geolocalização.');
+                console.error(error);
+            }
+        }
+
+        // Vamos supor que o id do seu formulário seja 'myForm'
+        document.getElementById('dataForm').addEventListener('submit', async (event) => {
+            event.preventDefault(); // Impedir que o formulário seja enviado da maneira tradicional
+
+            const formData = new FormData(event.target); // Obter os dados do formulário
+
+            try {
+                const response = await fetch('/consultarProduto/', {
+                    method: 'POST',
+                    body: formData, // Enviar os dados do formulário
+                });
+
+                const result = await response.json(); // Transformar a resposta em JSON
+
+                console.log(result); // Logar o resultado no console
+            } catch (error) {
+                alert('Ocorreu um erro ao enviar o formulário.');
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>
