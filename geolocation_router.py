@@ -31,8 +31,4 @@ async def get_geolocation(address: str):
             status_code=400, detail="Failed to get geolocation from Google Maps API"
         )
 
-<<<<<<< HEAD
     return {"latitude": latitude, "longitude": longitude}
-=======
-    return {"latitude": latitude, "longitude": longitude}
->>>>>>> 2090620 (Primeiro Commit)

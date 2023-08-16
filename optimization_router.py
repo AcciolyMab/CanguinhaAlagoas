@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from urllib.parse import unquote
 from collections import defaultdict
 from itertools import combinations
+import setup
 from docplex.mp.model import Model
 from utils import consultarProduto
 from fastapi import FastAPI, APIRouter, Request
@@ -21,13 +22,22 @@ optimization_router = APIRouter()
 
 templates = Jinja2Templates(directory="templates")
 
-@app.post("/minimum_cost_list")
+global_latitude = None
+global_longitude = None
 
-def get_minimum_cost_list():
-    return templates.TemplateResponse("minimum_cost_list.html", {})
+@optimization_router.get("/set_geolocation")
+def set_geolocation(latitude: float, longitude: float):
+    global global_latitude, global_longitude
+    global_latitude = latitude
+    global_longitude = longitude
+    return {"message": "Geolocation set successfully"}
 
+@optimization_router.get("/optimization")
+def optimization():
+    # Você pode usar global_latitude e global_longitude aqui
+    return {"latitude": global_latitude, "longitude": global_longitude}
 
-@app.post("/create_minimal_cost_list/")
+@optimization_router.post("/create_minimal_cost_list/")
 async def create_minimal_cost_list(request: Request):
     # Recebendo os dados JSON da solicitação
     response_list = await request.json()
