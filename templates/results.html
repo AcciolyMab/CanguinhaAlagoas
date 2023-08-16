@@ -265,15 +265,14 @@ function calculateMinimumCost() {
     })
     .then(response => response.json())
     .then(data => {
-        // Aqui você pode formatar os dados conforme necessário, por exemplo, construindo uma string HTML
-        var resultHtml = "<h3>Custo Total: " + data.total_cost + "</h3>"; // Personalize isso conforme necessário
-        document.getElementById('result').innerHTML = resultHtml;
+
+        // Atualizar o conteúdo da div "result" com o resultado da otimização
+        document.getElementById('result').innerHTML = data;
     })
     .catch(error => {
-        console.error('Ocorreu um erro:', error);
+        console.error('An error occurred:', error);
     });
 }
-
 </script>
 </body>
 </html>
