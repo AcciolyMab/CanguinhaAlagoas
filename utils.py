@@ -1,6 +1,8 @@
 # utils.py
 import requests
 import json
+import requests
+import json
 
 def consultarProduto(gtin_code: str, latitude: float, longitude: float, raio: int, dias: int):
     url = 'http://api.sefaz.al.gov.br/sfz-economiza-alagoas-api/api/public/produto/pesquisa'

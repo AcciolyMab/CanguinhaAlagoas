@@ -62,5 +62,3 @@ async def consultar_produto(request: Request):
                         response_list.append(item)
 
     return templates.TemplateResponse("results.html", {"request": request, "data": response_list})
-
-
