@@ -170,7 +170,7 @@
             const longitude = position.coords.longitude;
 
             globalLatitude = latitude;
-        globalLongitude = longitude;
+            globalLongitude = longitude;
 
             // Atualize os campos de latitude e longitude no formulário
             document.getElementById("latitude").value = latitude;
@@ -178,21 +178,20 @@
 
             // Envie os valores de latitude e longitude para o servidor usando AJAX
     $.ajax({
-        url: '/optimization', // A URL da rota no servidor que receberá os valores
-        method: 'GET', // Ou 'POST', dependendo de como você configurou a rota no servidor
-        data: {
-            latitude: latitude,
-            longitude: longitude
-        },
-        success: function(response) {
-            // Faça algo com a resposta do servidor se necessário
-            console.log(response);
-        },
-        error: function(error) {
-            // Trate qualquer erro que possa ocorrer
-            console.error(error);
-        }
-    });
+    url: '/set_geolocation', // A URL da rota no servidor que definirá as variáveis globais
+    method: 'GET', // Ou 'POST', dependendo de como você configurou a rota no servidor
+    data: {
+        latitude: latitude,
+        longitude: longitude
+    },
+    success: function(response) {
+        // Código para lidar com a resposta bem-sucedida
+    },
+    error: function(error) {
+        // Código para lidar com qualquer erro na chamada AJAX
+    }
+});
+
         }
 
         // Função de callback para tratamento de erros

@@ -37,10 +37,18 @@ def optimization():
     # Você pode usar global_latitude e global_longitude aqui
     return {"latitude": global_latitude, "longitude": global_longitude}
 
+
 @optimization_router.post("/create_minimal_cost_list/")
 async def create_minimal_cost_list(request: Request):
+    global global_latitude, global_longitude
+
+    if global_latitude is None or global_longitude is None:
+        return {"error": "Geolocation not set. Please set it first by calling /set_geolocation."}
+
     # Recebendo os dados JSON da solicitação
     response_list = await request.json()
+
+    #print("Dados recebidos:", response_list)
 
     # Crie um DataFrame usando a função create_dataframe
     df = create_dataframe(response_list)  # Adicione esta linha
@@ -54,7 +62,7 @@ async def create_minimal_cost_list(request: Request):
     # Chame a função de otimização com os parâmetros apropriados
     optimization_result = comprador_viajante(distance_matrix, price_matrix, product_dict)
 
-    m = folium.Map(location=[latitude_inicial, longitude_inicial], zoom_start=13)
+    m = folium.Map(location=[global_latitude, global_longitude], zoom_start=13)
 
     # Adicione marcadores para os locais na rota
     for location in optimization_result['route']:
@@ -66,41 +74,56 @@ async def create_minimal_cost_list(request: Request):
 
     # Prepare os dados para o template
     data_to_template = {
+        "request": request,
         "optimization_result": optimization_result,
         "map_file_path": map_file_path
     }
 
     # Renderize o template com os dados
-    return templates.TemplateResponse("minimum_cost_list.html", data_to_template)
+    return templates.TemplateResponse("rotaCustoMinimo.html", data_to_template)
 
 
 def create_dataframe(response_list):
-    data_list = []
+    # Lista para armazenar os dados
+    data = []
 
-    for response in response_list:
-        for item in response['conteudo']:
-            produto = item['produto']
-            estabelecimento = item['estabelecimento']
-            endereco = estabelecimento['endereco']
+    # Iterar sobre cada item na lista de resposta
+    for item in response_list:
+        # Adicionar cada item como uma linha no DataFrame
+        data.append({
+            "GTIN": item["gtin"],
+            "Descricao": item["descricao"],
+            "ValorVenda": item["valorVenda"],
+            "CNPJ": item["cnpj"],
+            "NomeFantasia": item["nomeFantasia"],
+            "Logradouro": item["nomeLogradouro"],
+            "NumeroImovel": item["numeroImovel"],
+            "Bairro": item["bairro"],
+            "Latitude": item["latitude"],
+            "Longitude": item["longitude"],
+        })
 
-            data = {
-                'CODIGO_BARRAS': int(produto['gtin']),
-                'NCM': int(produto['ncm']),
-                'PRODUTO': produto['descricao'],
-                'VALOR': produto['venda']['valorVenda'],
-                'CNPJ': int(estabelecimento['cnpj']),
-                'MERCADO': estabelecimento['nomeFantasia'],
-                'ENDERECO': endereco['nomeLogradouro'],
-                'NUMERO': endereco['numeroImovel'],
-                'BAIRRO': endereco['bairro'],
-                'LAT': endereco['latitude'],
-                'LONG': endereco['longitude']
-            }
+    # Criar um DataFrame usando pandas
+    df = pd.DataFrame(data)
+    # Criando um dicionário com o mapeamento dos nomes antigos e novos das colunas
+    column_mapping = {
+        "GTIN": "CODIGO_BARRAS",
+        "Descricao": "PRODUTO",
+        "ValorVenda": "VALOR",
+        "CNPJ": "CNPJ",
+        "NomeFantasia": "MERCADO",
+        "Logradouro": "ENDERECO",
+        "NumeroImovel": "NUMERO",
+        "Bairro": "BAIRRO",
+        "Latitude": "LAT",
+        "Longitude": "LONG",
+    }
 
-            data_list.append(data)
+    # Renomeando as colunas usando o método rename
+    df.rename(columns=column_mapping, inplace=True)
 
-    df = pd.DataFrame(data_list)
     return df
+
 
 def process_response(response):
     # Implemente a lógica para processar e otimizar a resposta conforme necessário
@@ -250,7 +273,7 @@ def calculate_products_and_subtotals(markets_to_buy, market_index_mapping, produ
                 products_by_market[market_cnpj].append((product_code, product_price))
                 if market_cnpj not in market_subtotals:
                     market_subtotals[market_cnpj] = 0
-                market_subtotals[market_cnpj] += product_price
+                market_subtotals[market_cnpj] += float(product_price)
 
     return products_by_market, market_subtotals
 
@@ -263,7 +286,7 @@ def filter_min_cost_products(markets_to_buy, product_dict):
         for market_cnpj in market_cnpj_list:
             if market_cnpj in product_dict[barcode]:
                 details = product_dict[barcode][market_cnpj]
-                product_price = details["valor"]
+                product_price = float(details["valor"])
                 if product_price < min_price:
                     min_price = product_price
                     min_market_cnpj = market_cnpj
@@ -273,7 +296,7 @@ def filter_min_cost_products(markets_to_buy, product_dict):
 
     return min_cost_products
 
-def process_solution(solution, market_index_mapping, n, m, z):
+def process_solution(solution, market_index_mapping, n, m, z, product_dict):
     markets_to_buy = [[] for _ in range(m)]
     for k in range(m):
         for i in range(1, n):  # Exclude the depot
@@ -291,6 +314,46 @@ def process_solution(solution, market_index_mapping, n, m, z):
     products_by_market, market_subtotals = calculate_products_and_subtotals(markets_to_buy, market_index_mapping, product_dict)
     total_cost_products = sum(subtotal for subtotal in market_subtotals.values())
     return total_cost_products, markets_to_buy
+
+def get_market_name_from_cnpj(market_cnpj, product_dict):
+    # Encontrar o nome do mercado que corresponde ao CNPJ fornecido
+    for markets_info in product_dict.values():
+        if market_cnpj in markets_info:
+            return markets_info[market_cnpj]['mercado']
+    return None # Retornar None se o CNPJ não for encontrado
+
+def find_route(solution, x, locations):
+    n = len(x)
+    route = [0]  # Start at the depot
+    current_location = 0
+    route_coordinates = [locations[0]]  # Add depot coordinates
+    while True:
+        next_location_found = False
+        for j in range(n):
+            if solution.get_value(x[current_location][j]) == 1:
+                if j == 0:  # If returning to depot, stop
+                    return route_coordinates
+                route_coordinates.append(locations[j])
+                current_location = j
+                next_location_found = True
+                break
+        if not next_location_found:
+            break
+    return route_coordinates
+
+
+def print_route(route, market_index_mapping):
+    route_with_names = ["Depot"]
+    for idx in route[1:]:  # Skip the depot
+        market_cnpj = [cnpj for cnpj, details in market_index_mapping.items() if details['index'] == idx]
+        if market_cnpj:
+            market_name = get_market_name_from_cnpj(
+                market_cnpj[0])  # You can write this function to get the market name from the CNPJ
+            route_with_names.append(market_name)
+        else:
+            raise ValueError(f"Index {idx} not found in market_index_mapping")
+    route_with_names.append("Depot")  # Add the depot at the end
+    route_string = " --> ".join(route_with_names)
 
 def comprador_viajante(distance_matrix, price_matrix, product_dict):
     start_time = time.time()
@@ -367,7 +430,7 @@ def comprador_viajante(distance_matrix, price_matrix, product_dict):
 
     if solution:
         market_index_mapping = create_market_index_mapping(product_dict)
-        total_cost_products, markets_to_buy = process_solution(solution, market_index_mapping, n, m, z)
+        total_cost_products, markets_to_buy = process_solution(solution, market_index_mapping, n, m, z, product_dict)
 
         # Calculate the total cost of distance
         total_cost_distance = 0
@@ -382,7 +445,9 @@ def comprador_viajante(distance_matrix, price_matrix, product_dict):
         result['execution_time'] = elapsed_time
         result['total_cost_products'] = np.round(total_cost_products, 2)
         result['total_cost'] = np.round(total_cost, 2)
-        result['route'] = find_route(solution, x)
+        locations = [product_info['localização'] for markets_info in product_dict.values() for product_info in
+                     markets_info.values()]
+        result['route'] = find_route(solution, x, locations)
 
         # Produtos comprados em cada mercado e subtotais
         products_by_market, market_subtotals = calculate_products_and_subtotals(markets_to_buy, market_index_mapping, product_dict)
@@ -391,10 +456,10 @@ def comprador_viajante(distance_matrix, price_matrix, product_dict):
         result['market_subtotals'] = {}
 
         for market_cnpj, products in products_by_market.items():
-            market_name = get_market_name_from_cnpj(market_cnpj)
+            market_name = get_market_name_from_cnpj(market_cnpj, product_dict)
             found_products = set()
             for product, price in products:
-                found_products.add((product, np.round(price, 2)))
+                found_products.add((product, np.round(float(price), 2)))
             result['products_by_market'][f"{market_cnpj} - {market_name}"] = found_products
 
         for market_cnpj, subtotal in market_subtotals.items():

@@ -39,8 +39,19 @@ async def consultar_produto(request: Request):
     dias = int(form_data.get("dias"))
     raio = int(form_data.get("raio"))
     address = form_data.get("address")
-    latitude = float(form_data.get("latitude"))
-    longitude = float(form_data.get("longitude"))
+    #latitude = float(form_data.get("latitude"))
+    #longitude = float(form_data.get("longitude"))
+    latitude_str = form_data.get("latitude")
+    if latitude_str:
+        latitude = float(latitude_str)
+    else:
+        raise ValueError(f"Latitude não informada")
+
+    longitude_str = form_data.get("longitude")
+    if longitude_str:
+        longitude = float(longitude_str)
+    else:
+        raise ValueError(f"Longitude não informada")
 
     # Clear the existing response list
     response_list.clear()
