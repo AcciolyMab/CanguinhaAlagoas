@@ -30,6 +30,7 @@ def set_geolocation(latitude: float, longitude: float):
     global global_latitude, global_longitude
     global_latitude = latitude
     global_longitude = longitude
+    print(f"Geolocation set to latitude: {global_latitude}, longitude: {global_longitude}") # Log de depuração
     return {"message": "Geolocation set successfully"}
 
 @optimization_router.get("/optimization")
@@ -55,7 +56,7 @@ async def get_results(request: Request):
 @optimization_router.post("/create_minimal_cost_list/")
 async def create_minimal_cost_list(request: Request):
     global global_latitude, global_longitude
-
+    print(f"Accessing geolocation: latitude: {global_latitude}, longitude: {global_longitude}") # Log de depuração
     if global_latitude is None or global_longitude is None:
         return {"error": "Geolocation not set. Please set it first by calling /set_geolocation."}
 
