@@ -175,6 +175,7 @@
             <thead>
                 <tr>
                     <th>GTIN</th>
+                    <th>NCM</th>
                     <th>Descrição</th>
                     <th>
                         Valor de Venda
@@ -195,6 +196,7 @@
                 {% for item in data %}
                     <tr>
                         <td>{{ item.produto.gtin }}</td>
+                        <td>{{ item.produto.ncm }}</td>
                         <td>{{ item.produto.descricao }}</td>
                         <td>{{ item.produto.venda.valorVenda }}</td>
                         <td>{{ item.estabelecimento.cnpj }}</td>
@@ -242,15 +244,16 @@ function calculateMinimumCost() {
     tableRows.forEach(function(row) {
         var rowData = {
             gtin: row.cells[0].textContent,
-            descricao: row.cells[1].textContent,
-            valorVenda: row.cells[2].textContent,
-            cnpj: row.cells[3].textContent,
-            nomeFantasia: row.cells[4].textContent,
-            nomeLogradouro: row.cells[5].textContent,
-            numeroImovel: row.cells[6].textContent,
-            bairro: row.cells[7].textContent,
-            latitude: row.cells[8].textContent,
-            longitude: row.cells[9].textContent
+                                ncm:row.cells[1].textContent,
+            descricao: row.cells[2].textContent,
+            valorVenda: row.cells[3].textContent,
+            cnpj: row.cells[4].textContent,
+            nomeFantasia: row.cells[5].textContent,
+            nomeLogradouro: row.cells[6].textContent,
+            numeroImovel: row.cells[7].textContent,
+            bairro: row.cells[8].textContent,
+            latitude: row.cells[9].textContent,
+            longitude: row.cells[10].textContent
         };
         data.push(rowData);
     });

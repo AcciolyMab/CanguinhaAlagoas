@@ -37,6 +37,20 @@ def optimization():
     # Você pode usar global_latitude e global_longitude aqui
     return {"latitude": global_latitude, "longitude": global_longitude}
 
+'''@optimization_router.get("/results", response_class=HTMLResponse)
+async def get_results(request: Request):
+    # Faça a chamada para a função de otimização e obtenha os resultados
+    optimization_result = create_minimal_cost_list()
+
+    route = optimization_result['route']
+    route_json = json.dumps(route) if route else '[]'
+
+    return templates.TemplateResponse("rotaCustoMinimo.html", {
+        "request": request,
+        "optimization_result": optimization_result,
+        "route_json": route_json
+    })'''
+
 
 @optimization_router.post("/create_minimal_cost_list/")
 async def create_minimal_cost_list(request: Request):
@@ -48,10 +62,10 @@ async def create_minimal_cost_list(request: Request):
     # Recebendo os dados JSON da solicitação
     response_list = await request.json()
 
-    #print("Dados recebidos:", response_list)
-
     # Crie um DataFrame usando a função create_dataframe
     df = create_dataframe(response_list)  # Adicione esta linha
+
+    df = filter_and_remove_duplicates(df)
 
     # Crie o dicionário de produtos
     product_dict = create_product_dict(df)  # Altere esta linha
@@ -92,6 +106,7 @@ def create_dataframe(response_list):
         # Adicionar cada item como uma linha no DataFrame
         data.append({
             "GTIN": item["gtin"],
+            "ncm": item["ncm"],
             "Descricao": item["descricao"],
             "ValorVenda": item["valorVenda"],
             "CNPJ": item["cnpj"],
@@ -108,6 +123,7 @@ def create_dataframe(response_list):
     # Criando um dicionário com o mapeamento dos nomes antigos e novos das colunas
     column_mapping = {
         "GTIN": "CODIGO_BARRAS",
+        "ncm": "NCM",
         "Descricao": "PRODUTO",
         "ValorVenda": "VALOR",
         "CNPJ": "CNPJ",
@@ -342,18 +358,15 @@ def find_route(solution, x, locations):
     return route_coordinates
 
 
-def print_route(route, market_index_mapping):
+def print_route(route_indices, market_index_mapping, product_dict):
     route_with_names = ["Depot"]
-    for idx in route[1:]:  # Skip the depot
-        market_cnpj = [cnpj for cnpj, details in market_index_mapping.items() if details['index'] == idx]
-        if market_cnpj:
-            market_name = get_market_name_from_cnpj(
-                market_cnpj[0])  # You can write this function to get the market name from the CNPJ
-            route_with_names.append(market_name)
-        else:
-            raise ValueError(f"Index {idx} not found in market_index_mapping")
+    for idx in route_indices[1:]:  # Skip the depot
+        market_cnpj = market_index_mapping[idx]['cnpj']
+        market_name = get_market_name_from_cnpj(market_cnpj, product_dict)
+        route_with_names.append(f"{market_name}")  # Include only the market name in the route
     route_with_names.append("Depot")  # Add the depot at the end
-    route_string = " --> ".join(route_with_names)
+    return " --> ".join(route_with_names)
+
 
 def comprador_viajante(distance_matrix, price_matrix, product_dict):
     start_time = time.time()
@@ -463,6 +476,7 @@ def comprador_viajante(distance_matrix, price_matrix, product_dict):
             result['products_by_market'][f"{market_cnpj} - {market_name}"] = found_products
 
         for market_cnpj, subtotal in market_subtotals.items():
-            result['market_subtotals'][market_cnpj] = np.round(subtotal, 2)
+            market_name = get_market_name_from_cnpj(market_cnpj, product_dict)
+            result['market_subtotals'][f"{market_cnpj} - {market_name}"] = np.round(subtotal, 2)
 
     return result

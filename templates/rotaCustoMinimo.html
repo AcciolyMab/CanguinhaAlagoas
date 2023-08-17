@@ -31,14 +31,6 @@
     <div class="content" id="optimizationResult">
         <h3>Custo Total dos Produtos: {{ optimization_result.total_cost_products }}</h3>
         <h3>Custo Total: {{ optimization_result.total_cost }}</h3>
-        <!-- Exibindo a rota -->
-        <h3>Rota:</h3>
-        <ul>
-            {% for location in optimization_result.route %}
-                <li>{{ location }}</li>
-            {% endfor %}
-        </ul>
-        <!-- Exibindo os produtos comprados em cada mercado -->
         <h3>Produtos por Mercado:</h3>
         {% for market, products in optimization_result.products_by_market.items() %}
             <h4>{{ market }}</h4>
@@ -48,7 +40,6 @@
                 {% endfor %}
             </ul>
         {% endfor %}
-        <!-- Exibindo os subtotais de mercado -->
         <h3>Subtotais por Mercado:</h3>
         <ul>
             {% for market_cnpj, subtotal in optimization_result.market_subtotals.items() %}
@@ -57,5 +48,4 @@
         </ul>
     </div>
 </body>
-</html>
 </html>
