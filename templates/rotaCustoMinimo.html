@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        .title {
+            text-align: center;
+            font-size: 32px;
+            margin-bottom: 20px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .content {
+            margin: 20px;
+            padding: 20px;
+            background-color: #f2f2f2;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="title">Resultado da Otimização</div>
+    <div class="content" id="optimizationResult">
+        <h3>Custo Total dos Produtos: {{ optimization_result.total_cost_products }}</h3>
+        <h3>Custo Total: {{ optimization_result.total_cost }}</h3>
+        <!-- Exibindo a rota -->
+        <h3>Rota:</h3>
+        <ul>
+            {% for location in optimization_result.route %}
+                <li>{{ location }}</li>
+            {% endfor %}
+        </ul>
+        <!-- Exibindo os produtos comprados em cada mercado -->
+        <h3>Produtos por Mercado:</h3>
+        {% for market, products in optimization_result.products_by_market.items() %}
+            <h4>{{ market }}</h4>
+            <ul>
+                {% for product, price in products %}
+                    <li>{{ product }}: {{ price }}</li>
+                {% endfor %}
+            </ul>
+        {% endfor %}
+        <!-- Exibindo os subtotais de mercado -->
+        <h3>Subtotais por Mercado:</h3>
+        <ul>
+            {% for market_cnpj, subtotal in optimization_result.market_subtotals.items() %}
+                <li>{{ market_cnpj }}: {{ subtotal }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+</body>
+</html>
+</html>

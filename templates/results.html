@@ -236,7 +236,7 @@
 <div id="result"></div>
 <script>
 function calculateMinimumCost() {
-    // Coletar os dados da tabela
+    // Collect data from the table
     var data = [];
     var tableRows = document.querySelectorAll('tbody tr');
     tableRows.forEach(function(row) {
@@ -255,7 +255,7 @@ function calculateMinimumCost() {
         data.push(rowData);
     });
 
-    // Fazer a chamada fetch para enviar os dados para o backend
+    // Make a fetch call to send the data to the backend
     fetch('/create_minimal_cost_list/', {
         method: 'POST',
         headers: {
@@ -263,11 +263,12 @@ function calculateMinimumCost() {
         },
         body: JSON.stringify(data)
     })
-    .then(response => response.json())
-    .then(data => {
-
-        // Atualizar o conteúdo da div "result" com o resultado da otimização
-        document.getElementById('result').innerHTML = data;
+    .then(response => response.text()) // Assuming the result is HTML
+    .then(html => {
+        // Open a new window to display the optimization result
+        var resultWindow = window.open("", "_blank");
+        resultWindow.document.write(html);
+        resultWindow.document.close();
     })
     .catch(error => {
         console.error('An error occurred:', error);
