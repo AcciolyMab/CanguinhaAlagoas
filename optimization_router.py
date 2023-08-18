@@ -2,7 +2,6 @@ import requests
 import json
 import numpy as np
 import pandas as pd
-import folium
 import time
 import networkx as nx
 from geopy.distance import geodesic
@@ -10,12 +9,11 @@ import matplotlib.pyplot as plt
 from urllib.parse import unquote
 from collections import defaultdict
 from itertools import combinations
-import setup
-from docplex.mp.model import Model
 from utils import consultarProduto
 from fastapi import FastAPI, APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value, LpSolution, LpStatus
 
 optimization_router = APIRouter()
 
@@ -52,7 +50,6 @@ async def get_results(request: Request):
         "route_json": route_json
     })
 
-
 @optimization_router.post("/create_minimal_cost_list/")
 async def create_minimal_cost_list(request: Request):
     global global_latitude, global_longitude
@@ -75,9 +72,10 @@ async def create_minimal_cost_list(request: Request):
     price_matrix, distance_matrix, indices = create_matrices(product_dict)
 
     # Chame a função de otimização com os parâmetros apropriados
-    optimization_result = comprador_viajante(distance_matrix, price_matrix, product_dict)
+    optimization_result = comprador_viajante_pulp(distance_matrix, price_matrix, product_dict)
+    print(f"Chegou: {optimization_result}")
 
-    m = folium.Map(location=[global_latitude, global_longitude], zoom_start=13)
+    '''m = folium.Map(location=[global_latitude, global_longitude], zoom_start=13)
 
     # Adicione marcadores para os locais na rota
     for location in optimization_result['route']:
@@ -85,13 +83,13 @@ async def create_minimal_cost_list(request: Request):
 
     # Salve o mapa como um arquivo HTML na pasta templates
     map_file_path = "templates/map_file.html"
-    m.save(map_file_path)
+    m.save(map_file_path)'''
 
     # Prepare os dados para o template
     data_to_template = {
         "request": request,
-        "optimization_result": optimization_result,
-        "map_file_path": map_file_path
+        "optimization_result": optimization_result
+        #"map_file_path": map_file_path
     }
 
     # Renderize o template com os dados
@@ -317,7 +315,7 @@ def process_solution(solution, market_index_mapping, n, m, z, product_dict):
     markets_to_buy = [[] for _ in range(m)]
     for k in range(m):
         for i in range(1, n):  # Exclude the depot
-            if solution.get_value(z[k][i]) == 1:
+            if  value(z[k][i]) == 1:
                 market_cnpj = market_index_mapping[i - 1]  # Subtract 1 to align with 0-based indexing
                 markets_to_buy[k].append(market_cnpj)
 
@@ -347,7 +345,7 @@ def find_route(solution, x, locations):
     while True:
         next_location_found = False
         for j in range(n):
-            if solution.get_value(x[current_location][j]) == 1:
+            if value(x[current_location][j]) == 1:
                 if j == 0:  # If returning to depot, stop
                     return route_coordinates
                 route_coordinates.append(locations[j])
@@ -369,89 +367,75 @@ def print_route(route_indices, market_index_mapping, product_dict):
     return " --> ".join(route_with_names)
 
 
-def comprador_viajante(distance_matrix, price_matrix, product_dict):
+def comprador_viajante_pulp(distance_matrix, price_matrix, product_dict):
     start_time = time.time()
-    n = len(distance_matrix) # Number of vertices, including depot
-    m = len(product_dict) - 1 # Number of products, excluding depot
-    c = distance_matrix      # Travel cost
-    b = np.transpose(price_matrix) # Buying cost
+    n = len(distance_matrix)  # Number of vertices, including depot
+    m = len(product_dict) - 1  # Number of products, excluding depot
+    c = distance_matrix  # Travel cost
+    b = np.transpose(price_matrix)  # Buying cost
 
     # Create the model
-    model = Model(name="route-and-buying-optimization")
+    model = LpProblem(name="route-and-buying-optimization", sense=LpMinimize)
 
     # Decision Variables
-    x = [[model.binary_var(name=f'x[{i},{j}]') for j in range(n)] for i in range(n)]
-    y = [model.binary_var(name=f'y[{i}]') for i in range(n)]
-    z = [[model.binary_var(name=f'z[{k},{i}]') for i in range(n)] for k in range(m)]
-    u = [model.continuous_var(name=f'u[{i}]') for i in range(1, n)] # excluding depot
-
+    x = [[LpVariable(name=f'x[{i},{j}]', cat='Binary') for j in range(n)] for i in range(n)]
+    y = [LpVariable(name=f'y[{i}]', cat='Binary') for i in range(n)]
+    z = [[LpVariable(name=f'z[{k},{i}]', cat='Binary') for i in range(n)] for k in range(m)]
+    u = [LpVariable(name=f'u[{i}]', lowBound=0, upBound=n - 2, cat='Continuous') for i in range(1, n)]  # excluding depot
 
     # Objective Function
     objective_terms = []
     for i in range(n):
         for j in range(n):
             if i != j:
-                market_cost=model.sum(c[i][j] * x[i][j])
-                objective_terms.append(market_cost)
-                #objective_terms.append(c[i][j] * x[i][j])
+                objective_terms.append(c[i][j] * x[i][j])
     for i in range(n):
         for k in range(m):
             if not np.isinf(b[k][i]):
-                product_costs=model.sum(b[k][i] * z[k][i])
-                objective_terms.append(product_costs)
-                #objective_terms.append(b[k][i] * z[k][i])
+                objective_terms.append(b[k][i] * z[k][i])
 
-    model.minimize(sum(objective_terms))
+    model += lpSum(objective_terms), "Total Cost"
 
-    # Seção de restrições
-    # Restrição 1: A soma das arestas saindo de um vértice i é igual a y[i]
+    # Constraints Section
+    # Constraint 1: The sum of edges leaving a vertex i is equal to y[i]
     for i in range(n):
-        model.add_constraint(model.sum(x[i][j] for j in range(n) if i != j) == y[i])
+        model += lpSum(x[i][j] for j in range(n) if i != j) == y[i]
 
-    # Restrição 2: Um produto deve ser comprado exatamente uma vez
+    # Constraint 2: A product must be bought exactly once
     for k in range(m):
-        model.add_constraint(model.sum(z[k][i] for i in range(n) if not np.isinf(b[k][i])) == 1)
+        model += lpSum(z[k][i] for i in range(n) if not np.isinf(b[k][i])) == 1
 
-    # Restrição 3: Um produto só pode ser comprado se o mercado correspondente for visitado
+    # Constraint 3: A product can only be bought if the corresponding market is visited
     for k in range(m):
         for i in range(n):
-            model.add_constraint(z[k][i] <= y[i])
+            model += z[k][i] <= y[i]
 
-    # Restrição 4: A rota deve iniciar e finalizar no depósito
-    model.add_constraint(y[0] == 1)
+    # Constraint 4: The route must start and end at the depot
+    model += y[0] == 1
 
-    # Restrições adicionais conforme a formulação
+    # Additional constraints as per formulation
     for i in range(1, n):
-        model.add_constraint(u[i-1] >= 0)
-        model.add_constraint(u[i-1] <= n-2)
         for j in range(1, n):
             if i != j:
-                model.add_constraint(u[i-1] - u[j-1] + n * x[i][j] <= n-2)
-
-    # Restrição 6
-    for i in range(1, n):
-        model.add_constraint(u[i-1] >= 0)
-
-
+                model += u[i - 1] - u[j - 1] + n * x[i][j] <= n - 2
 
     # Solve the model
-    solution = model.solve()
+    model.solve()
 
     end_time = time.time()
-
     elapsed_time = end_time - start_time
     result = {}
 
-    if solution:
+    if model.status == 1:  # Optimal solution found
         market_index_mapping = create_market_index_mapping(product_dict)
-        total_cost_products, markets_to_buy = process_solution(solution, market_index_mapping, n, m, z, product_dict)
+        total_cost_products, markets_to_buy = process_solution(model, market_index_mapping, n, m, z, product_dict)
 
         # Calculate the total cost of distance
         total_cost_distance = 0
         for i in range(n):
             for j in range(n):
                 if i != j:
-                    total_cost_distance += c[i][j] * solution.get_value(x[i][j])
+                    total_cost_distance += c[i][j] * x[i][j].varValue
 
         # Update the total cost calculation
         total_cost = total_cost_products + total_cost_distance
@@ -461,10 +445,11 @@ def comprador_viajante(distance_matrix, price_matrix, product_dict):
         result['total_cost'] = np.round(total_cost, 2)
         locations = [product_info['localização'] for markets_info in product_dict.values() for product_info in
                      markets_info.values()]
-        result['route'] = find_route(solution, x, locations)
+        result['route'] = find_route(model, x, locations)
 
         # Produtos comprados em cada mercado e subtotais
-        products_by_market, market_subtotals = calculate_products_and_subtotals(markets_to_buy, market_index_mapping, product_dict)
+        products_by_market, market_subtotals = calculate_products_and_subtotals(markets_to_buy, market_index_mapping,
+                                                                                product_dict)
 
         result['products_by_market'] = {}
         result['market_subtotals'] = {}
