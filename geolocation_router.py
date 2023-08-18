@@ -3,14 +3,16 @@ import requests
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+import os
 
 router = APIRouter()
 
+GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_API_KEY')
 
 @router.get("/geolocation", response_class=JSONResponse)
 async def get_geolocation(address: str):
     GOOGLE_MAPS_API_URL = "https://maps.googleapis.com/maps/api/geocode/json"
-    params = {"address": address, "key": "AIzaSyCMIgk-1yvr5wqGJrDbjPDAa7BmN6OB6Sk"}
+    params = {"address": address, "key": GOOGLE_MAPS_API_KEY}
 
     # Realizar a requisição à Google Maps API
     res = requests.get(GOOGLE_MAPS_API_URL, params=params)
