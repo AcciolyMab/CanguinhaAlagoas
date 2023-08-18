@@ -38,7 +38,7 @@ def optimization():
     # Você pode usar global_latitude e global_longitude aqui
     return {"latitude": global_latitude, "longitude": global_longitude}
 
-'''@optimization_router.get("/results", response_class=HTMLResponse)
+@optimization_router.get("/results", response_class=HTMLResponse)
 async def get_results(request: Request):
     # Faça a chamada para a função de otimização e obtenha os resultados
     optimization_result = create_minimal_cost_list()
@@ -50,7 +50,7 @@ async def get_results(request: Request):
         "request": request,
         "optimization_result": optimization_result,
         "route_json": route_json
-    })'''
+    })
 
 
 @optimization_router.post("/create_minimal_cost_list/")
