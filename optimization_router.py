@@ -13,6 +13,7 @@ from utils import consultarProduto
 from fastapi import FastAPI, APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+import googlemaps
 from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value, LpSolution, LpStatus
 
 optimization_router = APIRouter()
