@@ -25,28 +25,54 @@
             background-color: #f2f2f2;
             border-radius: 5px;
         }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
     </style>
 </head>
 <body>
     <div class="title">Resultado da Otimização</div>
-    <div class="content" id="optimizationResult">
-        <h3>Custo Total dos Produtos: {{ optimization_result.total_cost_products }}</h3>
-        <h3>Custo Total: {{ optimization_result.total_cost }}</h3>
-        <h3>Produtos por Mercado:</h3>
-        {% for market, products in optimization_result.products_by_market.items() %}
-            <h4>{{ market }}</h4>
-            <ul>
-                {% for product, price in products %}
-                    <li>{{ product }}: {{ price }}</li>
-                {% endfor %}
-            </ul>
-        {% endfor %}
-        <h3>Subtotais por Mercado:</h3>
-        <ul>
-            {% for market_cnpj, subtotal in optimization_result.market_subtotals.items() %}
-                <li>{{ market_cnpj }}: {{ subtotal }}</li>
+<div class="content" id="optimizationResult">
+    <h3>Custo Total dos Produtos: {{ optimization_result.total_cost_products }}</h3>
+    <h3>Custo da Rota: {{ optimization_result.route_cost }}</h3>
+    <h3>Custo Total: {{ optimization_result.minimum_route_cost }}</h3>
+
+    <h3>Produtos por Mercado:</h3>
+    {% for market_cnpj, products in optimization_result.products_by_market.items() %}
+        <h4>{{ products[0].mercado if products else 'Mercado desconhecido' }}</h4>
+        <table>
+            <tr>
+                <th>Produto</th>
+                <th>Preço</th>
+            </tr>
+            {% for product_info in products %}
+                <tr>
+                    <td>{{ product_info.categoria_nome }}</td>
+                    <td>{{ product_info.valor }}</td>
+                </tr>
             {% endfor %}
-        </ul>
-    </div>
+        </table>
+    {% endfor %}
+
+    <h3>Subtotais por Mercado:</h3>
+    <table>
+        <tr>
+            <th>Mercado</th>
+            <th>Subtotal</th>
+        </tr>
+        {% for market_cnpj, subtotal in optimization_result.subtotais_by_market.items() %}
+            <tr>
+                <td>{{ optimization_result.products_by_market[market_cnpj][0].mercado if optimization_result.products_by_market[market_cnpj] else 'Mercado desconhecido' }}</td>
+                <td>{{ subtotal }}</td>
+            </tr>
+        {% endfor %}
+    </table>
+</div>
 </body>
 </html>

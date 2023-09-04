@@ -1,4 +1,5 @@
 import requests
+import re
 import json
 import numpy as np
 import pandas as pd
@@ -17,6 +18,8 @@ from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpBinary, PULP_CBC_CM
 from itertools import product
 from itertools import chain, combinations
 from  categories import CATEGORIAS
+import warnings
+
 
 optimization_router = APIRouter()
 
@@ -56,7 +59,7 @@ async def get_results(request: Request):
 @optimization_router.post("/create_minimal_cost_list/")
 async def create_minimal_cost_list(request: Request):
     global global_latitude, global_longitude
-    print(f"Accessing geolocation: latitude: {global_latitude}, longitude: {global_longitude}") # Log de depuração
+    print(f"Accessing geolocation: latitude ACHOU: {global_latitude}, longitude: {global_longitude}") # Log de depuração
     if global_latitude is None or global_longitude is None:
         return {"error": "Geolocation not set. Please set it first by calling /set_geolocation."}
 
@@ -64,29 +67,36 @@ async def create_minimal_cost_list(request: Request):
     response_list = await request.json()
 
     # Crie um DataFrame usando a função create_dataframe
-    df = create_dataframe(response_list)  # Adicione esta linha
+    df = create_dataframe(response_list)
 
+    # 'categorias' contém as informações das categorias de produtos
+    product_dict_json, distance_matrix, cnpj_to_index_json, category_info = create_entries_for_solver(df, CATEGORIAS, global_latitude, global_longitude)
 
-    product_dict_json, distance_matrix, cnpj_to_index_json, category_info=create_entries_for_solver(df, CATEGORIAS)
+    print(f"Debug - product_dict_json: {product_dict_json}")  # Debug
 
-
+    # Simplificar o dicionário de produtos para algo mais fácil de usar
     simplified_product_dict = product_to_jsonDict(product_dict_json)
 
+    model, x, y, z, u, result_status, tempo, result_value, selected_items = pcc_Uncapacited_tour(distance_matrix, simplified_product_dict)
+    optimization_result = extract_results_and_route(selected_items, simplified_product_dict, distance_matrix, x, result_value, product_dict_json)
 
-    model, x_vars, y, z, u, result_status, tempo, result_value, selected_items = pcc_Uncapacited_tour(distance_matrix, simplified_product_dict)
+    # Verifica se 'products_by_market' existe e converte para dicionário padrão
+    if 'products_by_market' in optimization_result:
+        optimization_result['products_by_market'] = dict(optimization_result['products_by_market'])
 
-    optimization_result = extract_results_and_route(selected_items, simplified_product_dict, distance_matrix, x_vars, result_value)
+    # Verifica se 'market_subtotals' existe e converte para dicionário padrão
+    if 'market_subtotals' in optimization_result:
+        optimization_result['market_subtotals'] = dict(optimization_result['market_subtotals'])
 
+    # Prepare os dados para o template
+    data_to_template = {
+        "request": request,
+        "optimization_result": optimization_result
+        # "map_file_path": map_file_path
+    }
 
-    '''m = folium.Map(location=[global_latitude, global_longitude], zoom_start=13)
-
-    # Adicione marcadores para os locais na rota
-    for location in optimization_result['route']:
-        folium.Marker(location).add_to(m)
-
-    # Salve o mapa como um arquivo HTML na pasta templates
-    map_file_path = "templates/map_file.html"
-    m.save(map_file_path)'''
+    # Renderize o template com os dados
+    return templates.TemplateResponse("rotaCustoMinimo.html", data_to_template)
 
     # Prepare os dados para o template
     data_to_template = {
@@ -149,36 +159,44 @@ def process_response(response):
     optimized_result = response  # Modifique conforme necessário
     return optimized_result
 
-def create_entries_for_solver(df, categorias):
-
-    category_info = {}
-
-    depot_coordinates = (-9.65697, -35.70436)
-    product_dict = defaultdict(lambda: defaultdict(list))
-
-    unique_locations = df[['LAT', 'LONG']].drop_duplicates().values.tolist()
-    locations = [tuple(loc) for loc in unique_locations]
-    locations.insert(0, depot_coordinates)
-
-    cnpj_to_index = {str(coordinates): index for index, coordinates in enumerate(locations)}
-
+# 1. Função para criar a matriz de distâncias
+def create_distance_matrix(locations):
+    if not isinstance(locations, list):
+        raise TypeError("Expected 'locations' to be a list")
     n_markets = len(locations)
     distance_matrix = np.zeros((n_markets, n_markets), dtype=np.float64)
-
     for i in range(n_markets):
         for j in range(n_markets):
             if i != j:
                 dist = geodesic(locations[i], locations[j]).kilometers
                 fuel_cost = (dist / 9.5) * 5.98
                 distance_matrix[i][j] = dist + fuel_cost
+    print("Matriz de Distâncias:", distance_matrix)
+    return distance_matrix
+
+
+# 2. Função para mapear CNPJ para índices
+def map_cnpj_to_index(locations):
+    if not isinstance(locations, list):
+        raise TypeError("Expected 'locations' to be a list")
+    return {str(coordinates): index for index, coordinates in enumerate(locations)}
+
+
+# 3. Função para processar os produtos do DataFrame
+def process_products(df, categorias, distance_matrix, cnpj_to_index):
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("Expected 'df' to be a pandas DataFrame")
+    if not isinstance(categorias, dict):
+        raise TypeError("Expected 'categorias' to be a dictionary")
+    product_dict = defaultdict(lambda: defaultdict(list))
+    category_info = {}
 
     for index, row in df.iterrows():
-        if row['VALOR'] != 0:
+        if float(row['VALOR']) != 0.0:
             barcode = int(row['CODIGO_BARRAS'])
             cnpj = int(row['CNPJ'])
             mercado = str(row['MERCADO'])
             coordinates = (row['LAT'], row['LONG'])
-            endereco = row.get('ENDERECO', '')
             mercado_index = cnpj_to_index[str(coordinates)]
 
             total_cost = float(row['VALOR']) * distance_matrix[mercado_index][0]
@@ -186,13 +204,11 @@ def create_entries_for_solver(df, categorias):
             for categoria_id, categoria_info in categorias.items():
                 if barcode in categoria_info['barcode']:
                     categoria_nome = categoria_info['nome']
-
                     product_dict[categoria_id][barcode].append({
-                        'valor': row['VALOR'],
+                        'valor': float(row['VALOR']),
                         'cnpj': cnpj,
                         'mercado': mercado,
                         'coordinates': coordinates,
-                        'endereco': endereco,
                         'distancia': distance_matrix[mercado_index][0],
                         'custo_total': total_cost,
                         'categoria_nome': categoria_nome,
@@ -205,15 +221,31 @@ def create_entries_for_solver(df, categorias):
                             'id': categoria_id
                         }
 
+    return product_dict, category_info
+
+# 4. Função principal que utiliza as subfunções acima
+def create_entries_for_solver(df, categorias, global_latitude, global_longitude):
+    unique_locations = df[['LAT', 'LONG']].drop_duplicates().values.tolist()
+    locations = [tuple(loc) for loc in unique_locations]
+
+    depot_coordinates = (global_latitude, global_longitude)
+    locations.insert(0, depot_coordinates)
+
+    distance_matrix = create_distance_matrix(locations)
+    cnpj_to_index = map_cnpj_to_index(locations)
+
+    product_dict, category_info = process_products(df, categorias, distance_matrix, cnpj_to_index)
+
     product_dict_json = json.dumps(product_dict)
     cnpj_to_index_json = json.dumps(cnpj_to_index)
 
     return product_dict_json, distance_matrix, cnpj_to_index_json, category_info
 
+
+# 5. Função para simplificar o dicionário de produtos
 def product_to_jsonDict(product_dict_json):
     product_dict = json.loads(product_dict_json)
     simplified_product_dict = {}
-
     for category_id, barcodes in product_dict.items():
         for barcode, product_list in barcodes.items():
             for product in product_list:
@@ -224,7 +256,14 @@ def product_to_jsonDict(product_dict_json):
                 }
     return simplified_product_dict
 
+
+# As funções foram definidas em sequência. Você pode testá-las agora.
+
+
 def pcc_Uncapacited_tour(distance_matrix, simplified_product_dict):
+    print("Matriz de distâncias:", distance_matrix)
+    print("Dicionário de produtos simplificado:", simplified_product_dict)
+
     # Obter categorias únicas e o número total de mercados
     unique_categories = set(key[0] for key in simplified_product_dict.keys())
     n_categories = len(unique_categories)
@@ -313,6 +352,9 @@ def pcc_Uncapacited_tour(distance_matrix, simplified_product_dict):
     end_time = time.time()
     execution_time = (end_time - start_time)
 
+    '''print("Função Objetivo:", model.objective)
+    print("Restrições:", model.constraints)'''
+
     # Coletar e retornar resultados
 
     tempo = np.round(execution_time, 2)
@@ -320,65 +362,85 @@ def pcc_Uncapacited_tour(distance_matrix, simplified_product_dict):
     result_value = model.objective.value()
     selected_items = [(v.name, v.varValue) for v in model.variables() if v.varValue > 0]
 
+    '''print("X da Questão", x)
+
+    print("Status do Solver:", result_status)
+    print("Status do Solver:", result_value)
+    print("Variáveis de Decisão:", [(v.name, v.varValue) for v in model.variables() if v.varValue > 0])'''
+
     return model, x, y, z, u, result_status, tempo, result_value, selected_items
 
-def extract_results_and_route(selected_items, product_dict, distance_matrix, x_vars, result_value):
-    """
-    Função para extrair resultados e rota a partir das variáveis do modelo.
-    """
-    result_dict = {
-        'total_cost_products': 0,
-        'products_by_market': defaultdict(list),
-        'market_subtotals': defaultdict(float),
-        'route_cost': 0,
-        'minimum_route_cost': 0  # Novo campo para o custo mínimo da rota
+def verify_product_dict_format(product_dict):
+    # Verificação do formato do dicionário de produtos
+    if not isinstance(product_dict, dict):
+        raise ValueError("product_dict deve ser um dicionário.")
+
+
+def extract_product_info(z_value, product_dict):
+    z_values = z_value[2:-1].replace("(", "").replace(")", "").replace("_", "").replace("'", "").split(",")
+    i, category, barcode, cnpj = int(z_values[0]), z_values[1], z_values[2], int(z_values[3])
+
+    product_info = next((item for item in product_dict.get(category, {}).get(barcode, []) if item['cnpj'] == cnpj), None)
+
+    if product_info is not None:
+        mercado = f"{cnpj} - {product_info['mercado']}"
+        product_name = product_info['categoria_nome']
+        product_cost = product_info['valor']
+    else:
+        mercado = f"{cnpj} - Mercado desconhecido"
+        warnings.warn(f"Produto desconhecido encontrado: {z_value}")
+        product_name, product_cost = "Produto desconhecido", 0
+
+
+
+    return mercado, product_name, product_cost
+
+def extract_results_and_route(selected_items, simplified_product_dict, distance_matrix, x_vars, result_value,
+                              product_dict_json):
+    # Inicialização
+    total_cost_products = 0
+    subtotais_by_market = {}
+    products_by_market = {}
+
+    selected_products = [re.findall(r"z_\(\d+,_'(.+)',_'(.+)',_(.+)\)", item[0]) for item in selected_items if
+                         'z_' in item[0]]
+    selected_products = [item[0] for item in selected_products if item]
+
+    product_dict = json.loads(product_dict_json)
+
+    for (cat, barcode, cnpj) in selected_products:
+        cnpj = int(cnpj)
+        if cnpj not in products_by_market:
+            products_by_market[cnpj] = []
+
+        if (cat, barcode, cnpj) in simplified_product_dict:
+            product_info = simplified_product_dict[(cat, barcode, cnpj)]
+            additional_info = next(
+                (item for item in product_dict.get(cat, {}).get(barcode, []) if item['cnpj'] == cnpj), None)
+
+            if additional_info is not None:
+                product_info['mercado'] = additional_info['mercado']
+                product_info['categoria_nome'] = additional_info['categoria_nome']
+
+            products_by_market[cnpj].append(product_info)
+
+    subtotais_by_market = {mercado: sum([prod['valor'] for prod in prods]) for mercado, prods in products_by_market.items()}
+    total_cost_products = round(sum(subtotais_by_market.values()), 2)
+
+    # Calculando o custo da rota
+    #route_cost = round(sum([distance_matrix[i][j] for (i, j), var in x_vars.items() if var.value == 1.0]), 2)
+    # Debugging: Verifique os valores que contribuem para o custo da rota
+    contributing_values = [(i, j, distance_matrix[i][j], var.value) for (i, j), var in x_vars.items() if
+                           var.value == 1.0]
+
+    minimum_route_cost = round(result_value, 2)
+    route_cost = round(minimum_route_cost - total_cost_products, 2)
+
+    return {
+        "total_cost_products": total_cost_products,
+        "route_cost": route_cost,
+        "products_by_market": products_by_market,
+        "subtotais_by_market": subtotais_by_market,
+        "minimum_route_cost": minimum_route_cost,
     }
-    product_name = ""  # ou algum valor padrão
-    product_cost = 0  # ou algum valor padrão
-
-    # Identificar os mercados selecionados pela variável y
-    selected_markets = [int(item[0].split('_')[1]) for item in selected_items if item[0].startswith('y_')]
-
-    # Extração de produtos e custos
-    for item in selected_items:
-        if item[0].startswith('z_'):
-            z_values = item[0][2:-1].replace("(", "").replace(")", "").replace("_", "").replace("'", "").split(",")
-            i, category, barcode, cnpj = int(z_values[0]), z_values[1], z_values[2], int(z_values[3])
-
-            # Encontrar as informações do produto
-            product_info = next((item for item in product_dict.get(category, {}).get(barcode, []) if item['cnpj'] == cnpj), None)
-
-
-            if product_info is not None:
-                mercado = f"{cnpj} - {product_info['mercado']}"
-                product_name = product_info['categoria_nome']
-                product_cost = product_info['valor']
-            else:
-                mercado = f"{cnpj} - Mercado desconhecido"
-
-            result_dict['products_by_market'][mercado].append((product_name, np.round(product_cost, 2)))
-            result_dict['market_subtotals'][mercado] += product_cost
-            result_dict['total_cost_products'] += product_cost
-
-    # Ordenar os mercados pela sequência em que os produtos foram selecionados
-    ordered_markets = []
-    for cnpj in selected_markets:
-        for category in product_dict:
-            for barcode in product_dict[category]:
-                if isinstance(product_dict[category][barcode], list):
-                    if any(item['cnpj'] == cnpj for item in product_dict[category][barcode]):
-                        mercado = f"{cnpj} - {product_dict[category][barcode][0]['mercado']}"
-                    else:
-                        print(f"Tipo inesperado: {type(product_dict[category][barcode])}. Valor: {product_dict[category][barcode]}")
-                        if mercado not in ordered_markets:
-                            ordered_markets.append(mercado)
-
-    # Inicializar a rota começando e terminando no DEPOT
-    # result_dict['route'] = ['DEPOT'] + ordered_markets + ['DEPOT']
-
-    # Calcular o custo da rota e o custo mínimo
-    result_dict['route_cost'] = result_value - result_dict['total_cost_products']
-    result_dict['minimum_route_cost'] = result_value
-
-    return result_dict
 
