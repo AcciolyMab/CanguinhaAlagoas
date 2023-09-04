@@ -8,13 +8,15 @@ from geopy.distance import geodesic
 import matplotlib.pyplot as plt
 from urllib.parse import unquote
 from collections import defaultdict
-from itertools import combinations
 from utils import consultarProduto
 from fastapi import FastAPI, APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import googlemaps
-from pulp import LpMinimize, LpProblem, LpVariable, lpSum, value, LpSolution, LpStatus
+from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpBinary, PULP_CBC_CMD, LpStatus, LpContinuous, LpInteger, LpAffineExpression
+from itertools import product
+from itertools import chain, combinations
+from  categories import CATEGORIAS
 
 optimization_router = APIRouter()
 
@@ -64,17 +66,17 @@ async def create_minimal_cost_list(request: Request):
     # Crie um DataFrame usando a função create_dataframe
     df = create_dataframe(response_list)  # Adicione esta linha
 
-    df = filter_and_remove_duplicates(df)
 
-    # Crie o dicionário de produtos
-    product_dict = create_product_dict(df)  # Altere esta linha
+    product_dict_json, distance_matrix, cnpj_to_index_json, category_info=create_entries_for_solver(df, CATEGORIAS)
 
-    # Crie as matrizes de distância e preço
-    price_matrix, distance_matrix, indices = create_matrices(product_dict)
 
-    # Chame a função de otimização com os parâmetros apropriados
-    optimization_result = comprador_viajante_pulp(distance_matrix, price_matrix, product_dict)
-    print(f"Chegou: {optimization_result}")
+    simplified_product_dict = product_to_jsonDict(product_dict_json)
+
+
+    model, x_vars, y, z, u, result_status, tempo, result_value, selected_items = pcc_Uncapacited_tour(distance_matrix, simplified_product_dict)
+
+    optimization_result = extract_results_and_route(selected_items, simplified_product_dict, distance_matrix, x_vars, result_value)
+
 
     '''m = folium.Map(location=[global_latitude, global_longitude], zoom_start=13)
 
@@ -147,323 +149,236 @@ def process_response(response):
     optimized_result = response  # Modifique conforme necessário
     return optimized_result
 
-def filter_and_remove_duplicates(df):
-    # FILTRO PARA ELIMINAÇÃO DE PRODUTOS SEM GTIN
-    df = df[df['CODIGO_BARRAS'] != 0]
-    df = df[df['NCM'] != 0]
+def create_entries_for_solver(df, categorias):
 
-    # Drop duplicates based on 'CODIGO_BARRAS' and 'NCM'
-    df = df.drop_duplicates(subset=['CODIGO_BARRAS', 'NCM'])
+    category_info = {}
 
-    return df
+    depot_coordinates = (-9.65697, -35.70436)
+    product_dict = defaultdict(lambda: defaultdict(list))
 
-def rank_and_filter_markets(df):
-    # Create a unique ID for each market
-    df['unique_market_id'] = df['CNPJ'].astype(str) + ' - ' + df['MERCADO']
+    unique_locations = df[['LAT', 'LONG']].drop_duplicates().values.tolist()
+    locations = [tuple(loc) for loc in unique_locations]
+    locations.insert(0, depot_coordinates)
 
-    # Get a count of unique barcodes for each market
-    product_counts = df.groupby('unique_market_id')[['CODIGO_BARRAS']].nunique()
+    cnpj_to_index = {str(coordinates): index for index, coordinates in enumerate(locations)}
 
-    # Sort the counts in descending order and get the top 5
-    ranking_markets = product_counts.sort_values(by=['CODIGO_BARRAS'], ascending=False).head(5)
+    n_markets = len(locations)
+    distance_matrix = np.zeros((n_markets, n_markets), dtype=np.float64)
 
-    # Convert the Series to a DataFrame
-    ranking_markets = ranking_markets.reset_index()
+    for i in range(n_markets):
+        for j in range(n_markets):
+            if i != j:
+                dist = geodesic(locations[i], locations[j]).kilometers
+                fuel_cost = (dist / 9.5) * 5.98
+                distance_matrix[i][j] = dist + fuel_cost
 
-    # Get a list of unique_market_ids for the top 5 markets
-    ranking_markets = ranking_markets['unique_market_id'].tolist()
-
-    # Filter df to include only the top 5 markets
-    df = df[df['unique_market_id'].isin(ranking_markets)]
-
-    df.reset_index(drop=True, inplace=True)
-
-    return df
-
-def create_product_dict(df):
-    # Initialize the dictionary with the depot information
-    product_dict = {'00000': {
-        'Depot': {
-            'mercado': 'Depot',
-            'produto': 'Depot',
-            'endereco': ' ',
-            'localização': (-9.65697, -35.70436),
-            'valor': 0.0
-        }
-        # Other relevant details for the depot
-    }}
-
-    # Iterate through the rows of the dataframe
     for index, row in df.iterrows():
-        codigo_barras = str(row['CODIGO_BARRAS'])
-        valor = row['VALOR']
-        if valor != 0: # Ignore entries with value 0
-            mercado_info = {
-                row['CNPJ']: {
-                    "mercado": row['MERCADO'],
-                    "produto": row['PRODUTO'],
-                    'endereco': row['ENDERECO'],
-                    'numero': row['NUMERO'],
-                    "localização": (row['LAT'], row['LONG']),
-                    "valor": valor
+        if row['VALOR'] != 0:
+            barcode = int(row['CODIGO_BARRAS'])
+            cnpj = int(row['CNPJ'])
+            mercado = str(row['MERCADO'])
+            coordinates = (row['LAT'], row['LONG'])
+            endereco = row.get('ENDERECO', '')
+            mercado_index = cnpj_to_index[str(coordinates)]
+
+            total_cost = float(row['VALOR']) * distance_matrix[mercado_index][0]
+
+            for categoria_id, categoria_info in categorias.items():
+                if barcode in categoria_info['barcode']:
+                    categoria_nome = categoria_info['nome']
+
+                    product_dict[categoria_id][barcode].append({
+                        'valor': row['VALOR'],
+                        'cnpj': cnpj,
+                        'mercado': mercado,
+                        'coordinates': coordinates,
+                        'endereco': endereco,
+                        'distancia': distance_matrix[mercado_index][0],
+                        'custo_total': total_cost,
+                        'categoria_nome': categoria_nome,
+                        'categoria_id': categoria_id
+                    })
+
+                    if categoria_id not in category_info:
+                        category_info[categoria_id] = {
+                            'nome': categoria_nome,
+                            'id': categoria_id
+                        }
+
+    product_dict_json = json.dumps(product_dict)
+    cnpj_to_index_json = json.dumps(cnpj_to_index)
+
+    return product_dict_json, distance_matrix, cnpj_to_index_json, category_info
+
+def product_to_jsonDict(product_dict_json):
+    product_dict = json.loads(product_dict_json)
+    simplified_product_dict = {}
+
+    for category_id, barcodes in product_dict.items():
+        for barcode, product_list in barcodes.items():
+            for product in product_list:
+                key = (category_id, barcode, product['cnpj'])
+                simplified_product_dict[key] = {
+                    'distancia': product['distancia'],
+                    'valor': float(product['valor'])
                 }
-            }
+    return simplified_product_dict
 
-            # If the barcode is already in the dictionary, update the entry. Otherwise, add a new entry.
-            if codigo_barras in product_dict:
-                product_dict[codigo_barras].update(mercado_info)
-            else:
-                product_dict[codigo_barras] = mercado_info
+def pcc_Uncapacited_tour(distance_matrix, simplified_product_dict):
+    # Obter categorias únicas e o número total de mercados
+    unique_categories = set(key[0] for key in simplified_product_dict.keys())
+    n_categories = len(unique_categories)
+    n_markets = len(distance_matrix)
 
-    return product_dict
+    # Obter CNPJs únicos (identificadores de mercado)
+    cnjps = set(cnpj for (_, _, cnpj) in simplified_product_dict.keys())
 
-def create_matrices(product_dict):
-    depot_location = product_dict['00000']['Depot']['localização']
-    market_locations = [info['localização'] for markets in product_dict.values() for info in markets.values() if 'localização' in info and info['localização'] != depot_location]
-    locations = [depot_location] + market_locations
-    n = len(locations) # Total locations including depot
-    m = len(product_dict) - 1 # Number of products, excluding the depot
-    vehicle_consumption = 9.5 # km per liter
-    fuel_price_per_lt = 5.44
+    # Contar o número de produtos em cada categoria
+    n_product_dict = defaultdict(int)
+    for category, _, _ in simplified_product_dict.keys():
+        n_product_dict[category] += 1
+    n_product_dict = dict(n_product_dict)
 
-    # Create the distance and fuel cost matrix
-    distance_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                distance = geodesic(locations[i], locations[j]).kilometers
-                fuel_cost = distance * (1 / vehicle_consumption) * fuel_price_per_lt
-                distance_matrix[i][j] = distance + fuel_cost
-
-    # Create indices for the markets (starting at 1 to match matrix indexing, 0 is for depot)
-    market_index = {'Depot': 0}
-    idx = 1 # Start at 1 to match matrix indexing, 0 is for depot
-    for markets in product_dict.values():
-        for market_cnpj in markets.keys():
-            if market_cnpj != 'Depot' and market_cnpj not in market_index:
-                market_index[market_cnpj] = idx
-                idx += 1
-
-    # Create the price matrix (including a row for the depot)
-    price_matrix = np.full((n, m), float('inf'))
-    for product_idx, (product_code, markets_info) in enumerate([item for item in product_dict.items() if item[0] != '00000']):
-        for market_cnpj, product_info in markets_info.items():
-            price_matrix[market_index[market_cnpj]][product_idx] = product_info['valor']
-
-    return price_matrix, distance_matrix, market_index
-
-def create_market_index_mapping(product_dict):
-    market_index_mapping = []
-    for markets in product_dict.values():
-        for market_cnpj, details in markets.items():
-            if market_cnpj != 'Depot':
-                market_index_mapping.append(market_cnpj)
-    return market_index_mapping
-
-def calculate_markets_to_buy(solution, z, m, n, market_index_mapping):
-    markets_to_buy = {}
-    for k in range(m):
-        for i in range(1, n):
-            if solution.get_value(z[k][i]) == 1:
-                market_cnpjs = [cnpj for cnpj, details in market_index_mapping.items() if details['index'] == i]
-                if market_cnpjs:
-                    market_cnpj = market_cnpjs[0]
-                    markets_to_buy[k] = [market_cnpj]
-                else:
-                    raise ValueError(f"Index {i} not found in market_index_mapping")
-    return markets_to_buy
-
-def calculate_products_and_subtotals(markets_to_buy, market_index_mapping, product_dict):
-    products_by_market = {}
-    market_subtotals = {}
-
-    for product_idx, market_cnpj_list in enumerate(markets_to_buy):
-        for market_cnpj in market_cnpj_list:
-            barcode = list(product_dict.keys())[product_idx + 1] # Skip the depot
-            if market_cnpj in product_dict[barcode]:
-                details = product_dict[barcode][market_cnpj]
-                product_code = details["produto"]
-                product_price = details["valor"]
-                if market_cnpj not in products_by_market:
-                    products_by_market[market_cnpj] = []
-                products_by_market[market_cnpj].append((product_code, product_price))
-                if market_cnpj not in market_subtotals:
-                    market_subtotals[market_cnpj] = 0
-                market_subtotals[market_cnpj] += float(product_price)
-
-    return products_by_market, market_subtotals
-
-def filter_min_cost_products(markets_to_buy, product_dict):
-    min_cost_products = {}
-    for product_idx, market_cnpj_list in enumerate(markets_to_buy):
-        barcode = list(product_dict.keys())[product_idx + 1] # Skip the depot
-        min_price = float('inf')
-        min_market_cnpj = None
-        for market_cnpj in market_cnpj_list:
-            if market_cnpj in product_dict[barcode]:
-                details = product_dict[barcode][market_cnpj]
-                product_price = float(details["valor"])
-                if product_price < min_price:
-                    min_price = product_price
-                    min_market_cnpj = market_cnpj
-        if min_market_cnpj is not None:
-            min_cost_products[product_idx] = min_market_cnpj
-            #print(f"Produto {barcode} tem custo mínimo no mercado {min_market_cnpj} com preço {min_price}")
-
-    return min_cost_products
-
-def process_solution(solution, market_index_mapping, n, m, z, product_dict):
-    markets_to_buy = [[] for _ in range(m)]
-    for k in range(m):
-        for i in range(1, n):  # Exclude the depot
-            if  value(z[k][i]) == 1:
-                market_cnpj = market_index_mapping[i - 1]  # Subtract 1 to align with 0-based indexing
-                markets_to_buy[k].append(market_cnpj)
-
-    # Filtrar apenas os produtos com custo mínimo
-    min_cost_products = filter_min_cost_products(markets_to_buy, product_dict)
-
-    # Ajustar a lista markets_to_buy com base nos produtos filtrados
-    for product_idx, min_market_cnpj in min_cost_products.items():
-        markets_to_buy[product_idx] = [min_market_cnpj]
-
-    products_by_market, market_subtotals = calculate_products_and_subtotals(markets_to_buy, market_index_mapping, product_dict)
-    total_cost_products = sum(subtotal for subtotal in market_subtotals.values())
-    return total_cost_products, markets_to_buy
-
-def get_market_name_from_cnpj(market_cnpj, product_dict):
-    # Encontrar o nome do mercado que corresponde ao CNPJ fornecido
-    for markets_info in product_dict.values():
-        if market_cnpj in markets_info:
-            return markets_info[market_cnpj]['mercado']
-    return None # Retornar None se o CNPJ não for encontrado
-
-def find_route(solution, x, locations):
-    n = len(x)
-    route = [0]  # Start at the depot
-    current_location = 0
-    route_coordinates = [locations[0]]  # Add depot coordinates
-    while True:
-        next_location_found = False
-        for j in range(n):
-            if value(x[current_location][j]) == 1:
-                if j == 0:  # If returning to depot, stop
-                    return route_coordinates
-                route_coordinates.append(locations[j])
-                current_location = j
-                next_location_found = True
-                break
-        if not next_location_found:
-            break
-    return route_coordinates
-
-
-def print_route(route_indices, market_index_mapping, product_dict):
-    route_with_names = ["Depot"]
-    for idx in route_indices[1:]:  # Skip the depot
-        market_cnpj = market_index_mapping[idx]['cnpj']
-        market_name = get_market_name_from_cnpj(market_cnpj, product_dict)
-        route_with_names.append(f"{market_name}")  # Include only the market name in the route
-    route_with_names.append("Depot")  # Add the depot at the end
-    return " --> ".join(route_with_names)
-
-
-def comprador_viajante_pulp(distance_matrix, price_matrix, product_dict):
+    # Inicializar o modelo
+    model = LpProblem("Comprador-Viajante-ajustado", LpMinimize)
     start_time = time.time()
-    n = len(distance_matrix)  # Number of vertices, including depot
-    m = len(product_dict) - 1  # Number of products, excluding depot
-    c = distance_matrix  # Travel cost
-    b = np.transpose(price_matrix)  # Buying cost
+    # Variáveis de decisão
+    x = LpVariable.dicts("x", ((i, j) for i in range(n_markets) for j in range(n_markets)), 0, 1, 'Binary')
+    y = LpVariable.dicts("y", range(n_markets), 0, 1)
+    z = LpVariable.dicts("z", ((i, category, barcode, cnpj) for i in range(n_markets) for (category, barcode, cnpj) in
+                               simplified_product_dict.keys()), 0, 1, 'Binary')
+    u = LpVariable.dicts("u", range(n_markets), 0, n_markets - 1, LpInteger)
 
-    # Create the model
-    model = LpProblem(name="route-and-buying-optimization", sense=LpMinimize)
+    # Função objetivo para o custo da rota
+    route_cost = lpSum(distance_matrix[i][j] * x[i, j] for i in range(n_markets) for j in range(n_markets) if i != j)
 
-    # Decision Variables
-    x = [[LpVariable(name=f'x[{i},{j}]', cat='Binary') for j in range(n)] for i in range(n)]
-    y = [LpVariable(name=f'y[{i}]', cat='Binary') for i in range(n)]
-    z = [[LpVariable(name=f'z[{k},{i}]', cat='Binary') for i in range(n)] for k in range(m)]
-    u = [LpVariable(name=f'u[{i}]', lowBound=0, upBound=n - 2, cat='Continuous') for i in range(1, n)]  # excluding depot
+    # Função objetivo para o custo do produto
+    # Aqui, estou assumindo que 'barcodes' é uma lista de códigos de barras únicos. Se não for esse o caso, você deve ajustar isso.
+    barcodes = set(barcode for (_, barcode, _) in simplified_product_dict.keys())
+    product_combinations = list(product(range(n_markets), unique_categories, barcodes, cnjps))
 
-    # Objective Function
-    objective_terms = []
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                objective_terms.append(c[i][j] * x[i][j])
-    for i in range(n):
-        for k in range(m):
-            if not np.isinf(b[k][i]):
-                objective_terms.append(b[k][i] * z[k][i])
+    # Função objetivo para o custo do produto
+    # Função objetivo para o custo do produto
+    category_costs = {
+        category: lpSum(
+            (simplified_product_dict.get((category, barcode, cnpj), {}).get('valor', 0) +
+            simplified_product_dict.get((category, barcode, cnpj), {}).get('distancia', 0)) *
+            z[i, category, barcode, cnpj]
+            for i, (c, barcode, cnpj) in product(range(n_markets), simplified_product_dict.keys())
+            if c == category
+        )
+        for category in unique_categories
+    }
 
-    model += lpSum(objective_terms), "Total Cost"
+    # A função objetivo agora considera apenas um produto de cada categoria
+    product_cost = lpSum(category_costs[category] for category in unique_categories)
 
-    # Constraints Section
-    # Constraint 1: The sum of edges leaving a vertex i is equal to y[i]
-    for i in range(n):
-        model += lpSum(x[i][j] for j in range(n) if i != j) == y[i]
+    # Função objetivo total
+    model += route_cost + product_cost
 
-    # Constraint 2: A product must be bought exactly once
-    for k in range(m):
-        model += lpSum(z[k][i] for i in range(n) if not np.isinf(b[k][i])) == 1
+    # Restrições de seleção de um produto por categoria
+    for category in unique_categories:
+        model += lpSum(
+            z[i, category, barcode, cnpj]
+            for i, (c, barcode, cnpj) in product(range(n_markets), simplified_product_dict.keys())
+            if c == category
+        ) == 1
 
-    # Constraint 3: A product can only be bought if the corresponding market is visited
-    for k in range(m):
-        for i in range(n):
-            model += z[k][i] <= y[i]
+        # Restrições
+    for i in range(n_markets):
+        model += lpSum(x[i, j] for j in range(n_markets) if i != j) == y[i]
 
-    # Constraint 4: The route must start and end at the depot
+    for k in unique_categories:
+        model += lpSum(z[i, k, barcode, cnpj] for i, (category, barcode, cnpj) in
+                       product(range(n_markets), simplified_product_dict.keys()) if category == k) == 1
+
+    for i in range(n_markets):
+        for k in unique_categories:
+            model += lpSum(z[i, k, barcode, cnpj] for (category, barcode, cnpj) in simplified_product_dict.keys() if
+                           category == k) <= y[i]
+
+    # Restrição do depósito
     model += y[0] == 1
 
-    # Additional constraints as per formulation
-    for i in range(1, n):
-        for j in range(1, n):
+    # Restrições de subciclo
+    for i in range(1, n_markets):
+        for j in range(1, n_markets):
             if i != j:
-                model += u[i - 1] - u[j - 1] + n * x[i][j] <= n - 2
+                model += u[i] - u[j] + n_markets * x[i, j] <= n_markets - 1
 
-    # Solve the model
+    for i in range(1, n_markets):
+        model += u[i] >= 0
+    # Resolver o modelo
     model.solve()
-
     end_time = time.time()
-    elapsed_time = end_time - start_time
-    result = {}
+    execution_time = (end_time - start_time)
 
-    if model.status == 1:  # Optimal solution found
-        market_index_mapping = create_market_index_mapping(product_dict)
-        total_cost_products, markets_to_buy = process_solution(model, market_index_mapping, n, m, z, product_dict)
+    # Coletar e retornar resultados
 
-        # Calculate the total cost of distance
-        total_cost_distance = 0
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    total_cost_distance += c[i][j] * x[i][j].varValue
+    tempo = np.round(execution_time, 2)
+    result_status = model.status
+    result_value = model.objective.value()
+    selected_items = [(v.name, v.varValue) for v in model.variables() if v.varValue > 0]
 
-        # Update the total cost calculation
-        total_cost = total_cost_products + total_cost_distance
+    return model, x, y, z, u, result_status, tempo, result_value, selected_items
 
-        result['execution_time'] = elapsed_time
-        result['total_cost_products'] = np.round(total_cost_products, 2)
-        result['total_cost'] = np.round(total_cost, 2)
-        locations = [product_info['localização'] for markets_info in product_dict.values() for product_info in
-                     markets_info.values()]
-        result['route'] = find_route(model, x, locations)
+def extract_results_and_route(selected_items, product_dict, distance_matrix, x_vars, result_value):
+    """
+    Função para extrair resultados e rota a partir das variáveis do modelo.
+    """
+    result_dict = {
+        'total_cost_products': 0,
+        'products_by_market': defaultdict(list),
+        'market_subtotals': defaultdict(float),
+        'route_cost': 0,
+        'minimum_route_cost': 0  # Novo campo para o custo mínimo da rota
+    }
+    product_name = ""  # ou algum valor padrão
+    product_cost = 0  # ou algum valor padrão
 
-        # Produtos comprados em cada mercado e subtotais
-        products_by_market, market_subtotals = calculate_products_and_subtotals(markets_to_buy, market_index_mapping,
-                                                                                product_dict)
+    # Identificar os mercados selecionados pela variável y
+    selected_markets = [int(item[0].split('_')[1]) for item in selected_items if item[0].startswith('y_')]
 
-        result['products_by_market'] = {}
-        result['market_subtotals'] = {}
+    # Extração de produtos e custos
+    for item in selected_items:
+        if item[0].startswith('z_'):
+            z_values = item[0][2:-1].replace("(", "").replace(")", "").replace("_", "").replace("'", "").split(",")
+            i, category, barcode, cnpj = int(z_values[0]), z_values[1], z_values[2], int(z_values[3])
 
-        for market_cnpj, products in products_by_market.items():
-            market_name = get_market_name_from_cnpj(market_cnpj, product_dict)
-            found_products = set()
-            for product, price in products:
-                found_products.add((product, np.round(float(price), 2)))
-            result['products_by_market'][f"{market_cnpj} - {market_name}"] = found_products
+            # Encontrar as informações do produto
+            product_info = next((item for item in product_dict.get(category, {}).get(barcode, []) if item['cnpj'] == cnpj), None)
 
-        for market_cnpj, subtotal in market_subtotals.items():
-            market_name = get_market_name_from_cnpj(market_cnpj, product_dict)
-            result['market_subtotals'][f"{market_cnpj} - {market_name}"] = np.round(subtotal, 2)
 
-    return result
+            if product_info is not None:
+                mercado = f"{cnpj} - {product_info['mercado']}"
+                product_name = product_info['categoria_nome']
+                product_cost = product_info['valor']
+            else:
+                mercado = f"{cnpj} - Mercado desconhecido"
+
+            result_dict['products_by_market'][mercado].append((product_name, np.round(product_cost, 2)))
+            result_dict['market_subtotals'][mercado] += product_cost
+            result_dict['total_cost_products'] += product_cost
+
+    # Ordenar os mercados pela sequência em que os produtos foram selecionados
+    ordered_markets = []
+    for cnpj in selected_markets:
+        for category in product_dict:
+            for barcode in product_dict[category]:
+                if isinstance(product_dict[category][barcode], list):
+                    if any(item['cnpj'] == cnpj for item in product_dict[category][barcode]):
+                        mercado = f"{cnpj} - {product_dict[category][barcode][0]['mercado']}"
+                    else:
+                        print(f"Tipo inesperado: {type(product_dict[category][barcode])}. Valor: {product_dict[category][barcode]}")
+                        if mercado not in ordered_markets:
+                            ordered_markets.append(mercado)
+
+    # Inicializar a rota começando e terminando no DEPOT
+    # result_dict['route'] = ['DEPOT'] + ordered_markets + ['DEPOT']
+
+    # Calcular o custo da rota e o custo mínimo
+    result_dict['route_cost'] = result_value - result_dict['total_cost_products']
+    result_dict['minimum_route_cost'] = result_value
+
+    return result_dict
+
